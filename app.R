@@ -34,12 +34,15 @@ ui <- fluidPage(
       
       h3("Filters", style = "color: #34495e; margin-top: 0;"),
       
-      # Dropdown for Gender filter
-      selectInput(
-        inputId = "gender_filter",
-        label = "Select Gender:",
-        choices = c("All" = "All", "Male" = "Male", "Female" = "Female"),
-        selected = "All"
+      # Dropdown for Gender filter (conditional - only shown if Gender column exists)
+      conditionalPanel(
+        condition = "output.hasGender",
+        selectInput(
+          inputId = "gender_filter",
+          label = "Select Gender:",
+          choices = c("All" = "All", "Male" = "Male", "Female" = "Female"),
+          selected = "All"
+        )
       ),
       
       # Dropdown for Outcome filter
@@ -161,7 +164,12 @@ server <- function(input, output, session) {
   # Note: Make sure diabetes_dataset.csv is in the same folder as app.R
   diabetes_data <- reactive({
     tryCatch({
-      data <- read.csv("diabetes_dataset.csv", stringsAsFactors = FALSE)
+      # Get the directory where app.R is located
+      app_dir <- getwd()
+      csv_path <- file.path(app_dir, "diabetes_dataset.csv")
+      
+      # Read the CSV file
+      data <- read.csv(csv_path, stringsAsFactors = FALSE, check.names = FALSE)
       
       # Handle missing values (replace 0s in certain columns with NA if they don't make sense)
       # Note: 0 in Glucose, BloodPressure, BMI might indicate missing values
@@ -172,13 +180,21 @@ server <- function(input, output, session) {
       # Convert Outcome to factor for better plotting
       data$Outcome <- factor(data$Outcome, levels = c(0, 1), labels = c("Non-Diabetic", "Diabetic"))
       
-      # Convert Gender to factor
-      data$Gender <- factor(data$Gender)
+      # Convert Gender to factor only if Gender column exists
+      if("Gender" %in% colnames(data)) {
+        data$Gender <- factor(data$Gender)
+      }
       
       return(data)
     }, error = function(e) {
-      showNotification("Error loading dataset. Please ensure diabetes_dataset.csv exists in the project folder.",
-                      type = "error", duration = 10)
+      # Show detailed error message
+      error_msg <- paste("Error loading dataset:", e$message, 
+                        "\nPlease ensure diabetes_dataset.csv exists in:", getwd())
+      showNotification(error_msg, type = "error", duration = 15)
+      cat("Error loading CSV:", e$message, "\n")
+      cat("Working directory:", getwd(), "\n")
+      cat("CSV file path:", file.path(getwd(), "diabetes_dataset.csv"), "\n")
+      cat("File exists:", file.exists(file.path(getwd(), "diabetes_dataset.csv")), "\n")
       return(NULL)
     })
   })
@@ -189,9 +205,11 @@ server <- function(input, output, session) {
     
     if (is.null(data)) return(NULL)
     
-    # Apply Gender filter
-    if (input$gender_filter != "All") {
-      data <- data %>% filter(Gender == input$gender_filter)
+    # Apply Gender filter (only if Gender column exists and filter is set)
+    if("Gender" %in% colnames(data)) {
+      if (input$gender_filter != "All") {
+        data <- data %>% filter(Gender == input$gender_filter)
+      }
     }
     
     # Apply Outcome filter
@@ -219,6 +237,16 @@ server <- function(input, output, session) {
       filtered_data_initial()
     }
   })
+  
+  # Check if Gender column exists (for conditional UI)
+  output$hasGender <- reactive({
+    data <- diabetes_data()
+    if (!is.null(data)) {
+      return("Gender" %in% colnames(data))
+    }
+    return(FALSE)
+  })
+  outputOptions(output, "hasGender", suspendWhenHidden = FALSE)
   
   # ===== OUTPUT: Dataset Info =====
   output$data_info <- renderText({
